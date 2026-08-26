@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ระบบบันทึกข้อความขออนุมัตินิเทศ</title>
+    
+    <!-- เรียกใช้ Tailwind CSS ผ่าน CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- เรียกใช้ไอคอน Lucide ผ่าน CDN -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <!-- เรียกใช้ html2pdf.js สำหรับดาวน์โหลด PDF คุณภาพสูง -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    
+    <!-- CSS สำหรับการจัดหน้าพิมพ์และฟอนต์มาตรฐานราชการ -->
+    <style>
+        /* นำเข้าฟอนต์ TH Sarabun New เพื่อใช้เป็นตัวสำรองกรณีเครื่องไม่มี TH SarabunPSK */
+        @font-face {
+            font-family: 'TH Sarabun New';
+            src: url('https://cdn.jsdelivr.net/gh/lazywasabi/thai-web-fonts@7/fonts/THSarabunNew/THSarabunNew.woff2') format('woff2');
+            font-weight: normal;
+            font-style: normal;
+        }
+        @font-face {
+            font-family: 'TH Sarabun New';
+            src: url('https://cdn.jsdelivr.net/gh/lazywasabi/thai-web-fonts@7/fonts/THSarabunNew/THSarabunNew-Bold.woff2') format('woff2');
+            font-weight: bold;
+            font-style: normal;
+        }
+
+        body {
+            font-family: 'TH SarabunPSK', 'TH Sarabun New', sans-serif;
+            background-color: #f3f4f6;
+        }
+
+        .sarabun {
+            font-family: 'TH SarabunPSK', 'TH Sarabun New', sans-serif;
+        }
+
+        .hidden-element {
+            display: none !important;
+        }
+
+        /* -----------------------------------------------------------------
+           การตั้งค่าขนาด A4 สำหรับโหมด "ดูตัวอย่างเอกสาร" (Preview) บนหน้าจอ 
+           ปรับปรุง Padding ขอบบน-ล่างเป็น 1.2cm เพื่อเพิ่มพื้นที่แสดงผลโหมดออนไซต์
+           ----------------------------------------------------------------- */
+        #preview-container {
+            display: flex;
+            justify-content: center;
+            padding: 20px 0;
+        }
+
+        .print-area {
+            width: 210mm; /* ความกว้างมาตรฐาน A4 */
+            height: 297mm; /* ความสูงมาตรฐาน A4 */
+            max-height: 297mm; /* ล็อกความสูงสูงสุดไม่ให้เกินขนาดหน้าจริง */
+            padding: 1.2cm 2.5cm 1.2cm 2.5cm; /* ปรับขอบกระดาษ บน-ล่าง ให้กะทัดรัดขึ้น */
+            background-color: white;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15); 
+            box-sizing: border-box; /* ให้ padding รวมอยู่ในขนาด 210x297mm */
+            overflow: hidden; /* ล็อกไม่ให้ข้อความล้นและไหลออกนอกกรอบ */
+            position: relative;
+        }
+
+        /* -----------------------------------------------------------------
+           การตั้งค่าขนาด A4 สำหรับโหมด "พิมพ์เอกสาร" (Print) ผ่านเครื่องปรินต์
+           ----------------------------------------------------------------- */
+        @media print {
+            @page {
+                size: A4 portrait; /* กำหนดทิศทางแนวตั้งและขนาดกระดาษ A4 */
+                margin: 0; /* ล้างค่าขอบเริ่มต้นของระบบพิมพ์เพื่อความแม่นยำ */
+            }
+            body, html {
+                margin: 0;
+                padding: 0;
+                width: 210mm !important;
+                height: 297mm !important;
+                background-color: white !important;
+                overflow: hidden !important;
+            }
+            .no-print {
+                display: none !important;
+            }
+            #preview-container {
+                padding: 0 !important;
+                display: block !important;
+            }
+            .print-area {
+                width: 210mm !important;
+                height: 297mm !important; 
+                max-height: 297mm !important;
+                padding: 1.2cm 2.5cm 1.2cm 2.5cm !important;
+                margin: 0 !important;
+                box-shadow: none !important; 
+                border: none !important;
+                box-sizing: border-box !important;
+                page-break-inside: avoid !important;
+                page-break-after: avoid !important;
+                overflow: hidden !important;
+            }
+        }
+    </style>
+</head>
+<body class="text-gray-800 min-h-screen text-[16pt]">
+
+    <!-- แถบนำทางด้านบน (ซ่อนตอนพิมพ์) -->
+    <nav class="bg-green-700 text-white p-4 shadow-md no-print sticky top-0 z-10 font-sans">
+        <div class="max-w-7xl mx-auto flex flex-col md:flex-row md:justify-between md:items-center gap-3">
+            <div class="flex items-center space-x-2 text-xl font-bold">
+                <i data-lucide="layout-template" class="w-6 h-6 flex-shrink-0"></i>
+                <span class="text-lg sm:text-xl truncate">ระบบฟอร์มบันทึกข้อความ</span>
+            </div>
+            <div class="flex flex-wrap gap-2 justify-end">
+                <button 
+                    id="btn-toggle-preview"
+                    onclick="togglePreview()"
+                    class="px-3.5 py-1.5 rounded-lg font-medium transition flex items-center space-x-1.5 bg-green-600 hover:bg-green-500 text-white text-sm"
+                >
+                    <i data-lucide="printer" class="w-4 h-4 icon-default"></i>
+                    <i data-lucide="file-text" class="w-4 h-4 icon-active hidden-element"></i>
+                    <span id="text-toggle-preview">ดูตัวอย่างเอกสาร</span>
+                </button>
+                <button 
+                    id="btn-print"
+                    onclick="window.print()"
+                    class="bg-blue-600 hover:bg-blue-500 px-3.5 py-1.5 rounded-lg font-medium transition flex items-center space-x-1.5 hidden-element text-sm"
+                >
+                    <i data-lucide="printer" class="w-4 h-4"></i>
+                    <span>พิมพ์เอกสาร</span>
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- ส่วนที่ 1: ฟอร์มกรอกข้อมูล -->
+    <main id="form-container" class="max-w-6xl mx-auto p-4 sm:p-6 no-print font-sans">
+        <div class="bg-white rounded-xl shadow-lg p-6 sm:p-8">
+            <div class="mb-8 text-center border-b pb-6">
+                <h2 class="text-2xl font-bold text-gray-800 mb-4">ฟอร์มกรอกข้อมูลขออนุมัตินิเทศ</h2>
+                
+                <!-- เลือกประเภท -->
+                <div class="flex justify-center space-x-4">
+                    <label id="btn-type-online" onclick="setFormType('online')" class="cursor-pointer px-6 py-3 rounded-full border-2 transition-all flex items-center space-x-2 border-green-500 bg-green-50 text-green-700 font-bold">
+                        <div id="circle-type-online" class="w-4 h-4 rounded-full border-2 border-green-500 bg-green-500"></div>
+                        <span>นิเทศออนไลน์</span>
+                    </label>
+                    <label id="btn-type-onsite" onclick="setFormType('onsite')" class="cursor-pointer px-6 py-3 rounded-full border-2 transition-all flex items-center space-x-2 border-gray-200 hover:bg-gray-50">
+                        <div id="circle-type-onsite" class="w-4 h-4 rounded-full border-2 border-gray-400"></div>
+                        <span>ไปราชการ (ออนไซต์)</span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <!-- ข้อมูลทั่วไป -->
+                <div class="space-y-6">
+                    <h3 class="text-lg font-bold text-gray-700 flex items-center border-b pb-2"><i data-lucide="file-text" class="w-5 h-5 mr-2"></i> ข้อมูลเอกสาร</h3>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">เลขที่เอกสาร</label>
+                            <input type="text" id="in_docNo" oninput="syncData()" placeholder=".............../.............." class="w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none" />
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">วันที่ออกเอกสาร</label>
+                            <input type="date" id="in_docDate" oninput="syncData()" class="w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none" />
+                        </div>
+                    </div>
+
+                    <h3 class="text-lg font-bold text-gray-700 flex items-center border-b pb-2 mt-6"><i data-lucide="user" class="w-5 h-5 mr-2"></i> ข้อมูลบุคคล</h3>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">สาขาวิชา</label>
+                        <input type="text" id="in_major" oninput="syncData()" placeholder="ระบุสาขาวิชา" class="w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none" />
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">ชื่อผู้ขออนุมัติ</label>
+                        <input type="text" id="in_requester" oninput="syncData()" placeholder="นาย/นาง/นางสาว..." class="w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none" />
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2 flex items-center"><i data-lucide="users" class="w-4 h-4 mr-1"></i> ผู้ร่วมเดินทาง/ผู้นิเทศร่วม (ถ้ามี)</label>
+                        <input type="text" id="in_coSup1" oninput="syncData()" placeholder="1. ชื่อ-สกุล" class="w-full border border-gray-300 rounded-lg p-2 mb-2 focus:ring-2 focus:ring-green-500 outline-none text-sm" />
+                        <input type="text" id="in_coSup2" oninput="syncData()" placeholder="2. ชื่อ-สกุล" class="w-full border border-gray-300 rounded-lg p-2 mb-2 focus:ring-2 focus:ring-green-500 outline-none text-sm" />
+                        <input type="text" id="in_coSup3" oninput="syncData()" placeholder="3. ชื่อ-สกุล" class="w-full border border-gray-300 rounded-lg p-2 mb-2 focus:ring-2 focus:ring-green-500 outline-none text-sm" />
+                        <div id="co-sup-4-container">
+                            <input type="text" id="in_coSup4" oninput="syncData()" placeholder="4. ชื่อ-สกุล (สำหรับออนไลน์)" class="w-full border border-gray-300 rounded-lg p-2 mb-2 focus:ring-2 focus:ring-green-500 outline-none text-sm" />
+                        </div>
+                    </div>
+                </div>
+
+                <!-- สถานที่และวันเวลา -->
+                <div class="space-y-6">
+                    <h3 class="text-lg font-bold text-gray-700 flex items-center border-b pb-2"><i data-lucide="calendar" class="w-5 h-5 mr-2"></i> กำหนดการนิเทศ</h3>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">ตั้งแต่วันที่</label>
+                            <input type="date" id="in_startDate" oninput="syncData()" class="w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-green-500 outline-none" />
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">ถึงวันที่</label>
+                            <input type="date" id="in_endDate" oninput="syncData()" class="w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-green-500 outline-none" />
+                        </div>
+                    </div>
+
+                    <h3 class="text-lg font-bold text-gray-700 flex items-center border-b pb-2 mt-6"><i data-lucide="map-pin" class="w-5 h-5 mr-2"></i> สถานที่นิเทศ</h3>
+                    
+                    <div class="flex gap-2">
+                        <div class="flex-grow">
+                            <input type="text" id="in_school1" oninput="syncData()" placeholder="ณ โรงเรียนที่ 1" class="w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-green-500 outline-none text-sm" />
+                        </div>
+                        <div class="w-1/3">
+                            <input type="text" id="in_province1" oninput="syncData()" placeholder="จังหวัด" class="w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-green-500 outline-none text-sm" />
+                        </div>
+                    </div>
+                    <div class="flex gap-2">
+                        <div class="flex-grow">
+                            <input type="text" id="in_school2" oninput="syncData()" placeholder="ณ โรงเรียนที่ 2" class="w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-green-500 outline-none text-sm" />
+                        </div>
+                        <div class="w-1/3">
+                            <input type="text" id="in_province2" oninput="syncData()" placeholder="จังหวัด" class="w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-green-500 outline-none text-sm" />
+                        </div>
+                    </div>
+                    <div class="flex gap-2">
+                        <div class="flex-grow">
+                            <input type="text" id="in_school3" oninput="syncData()" placeholder="ณ โรงเรียนที่ 3" class="w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-green-500 outline-none text-sm" />
+                        </div>
+                        <div class="w-1/3">
+                            <input type="text" id="in_province3" oninput="syncData()" placeholder="จังหวัด" class="w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-green-500 outline-none text-sm" />
+                        </div>
+                    </div>
+
+                    <!-- ข้อมูลยานพาหนะ (แสดงเฉพาะออนไซต์) -->
+                    <div id="vehicle-input-section" class="mt-6 bg-blue-50 p-4 rounded-lg border border-blue-200 hidden-element">
+                        <h3 class="text-md font-bold text-blue-800 flex items-center mb-3"><i data-lucide="car" class="w-5 h-5 mr-2"></i> ข้อมูลยานพาหนะ</h3>
+                        <div>
+                            <label class="block text-sm font-medium text-blue-800 mb-1">หมายเลขทะเบียนรถยนต์ส่วนตัว</label>
+                            <input type="text" id="in_vehicle" oninput="syncData()" placeholder="เช่น กข 1234 เลย" class="w-full border border-blue-300 rounded-lg p-2.5 focus:ring-2 focus:ring-blue-500 outline-none" />
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="mt-8 text-center pt-6 border-t">
+                <button onclick="togglePreview(true)" class="bg-green-600 text-white hover:bg-green-700 px-8 py-3 rounded-xl font-bold text-lg shadow-md transition-transform transform hover:scale-105 inline-flex items-center space-x-2">
+                    <i data-lucide="file-text" class="w-6 h-6"></i>
+                    <span>สร้างเอกสารพร้อมพิมพ์</span>
+                </button>
+            </div>
+        </div>
+    </main>
+
+    <!-- ส่วนที่ 2: แสดงผลเพื่อพิมพ์ (A4 Print Preview) -->
+    <div id="preview-container" class="hidden-element">
+        <div class="sarabun print-area" id="a4-document-container">
+            
+            <!-- หัวกระดาษ (ตราครุฑ และ คำว่า บันทึกข้อความ) -->
+            <div class="flex items-start mb-1.5 relative">
+                <!-- ใส่ตราครุฑ ปรับขนาดกว้าง-สูงให้ได้ 1.5 ซม. ตามระเบียบงานสารบรรณสำหรับบันทึกข้อความ -->
+                <div class="w-[1.5cm] h-[1.5cm] absolute top-0 left-0">
+                    <img id="garuda-logo" src="https://lh3.googleusercontent.com/d/1p8T15vbyZaM8Ra8vriAcoRotn9Ir4OFf" 
+                         alt="ตราครุฑ" 
+                         class="w-full h-full object-contain"
+                         crossorigin="anonymous"
+                         onerror="this.style.display='none'">
+                </div>
+                <!-- คำว่า บันทึกข้อความ ขนาด 29pt ตามระเบียบสารบรรณ และกระชับบรรทัด -->
+                <div class="flex-1 text-center font-bold pt-1" style="font-size: 29pt; line-height: 1.1;">
+                    บันทึกข้อความ
+                </div>
+            </div>
+
+            <!-- ส่วนราชการ ที่ วันที่ (Header เป็นตัวหนา 20pt) -->
+            <div class="flex items-baseline mb-[1px] text-[16pt]">
+                <span class="font-bold text-[20pt] mr-2">ส่วนราชการ</span>
+                <span class="flex-1 border-b border-dotted border-gray-500 pl-2">มหาวิทยาลัยราชภัฏเลย คณะครุศาสตร์ ศูนย์ฝึกประสบการณ์วิชาชีพครู โทร. 4-4110</span>
+            </div>
+            <div class="flex items-baseline mb-[1px] text-[16pt]">
+                <span class="font-bold text-[20pt] mr-2">ที่</span>
+                <span id="out_docNo" class="w-1/3 border-b border-dotted border-gray-500 pl-2 text-center">........................</span>
+                <span class="font-bold text-[20pt] mx-4">วันที่</span>
+                <span id="out_docDate" class="flex-1 border-b border-dotted border-gray-500 pl-2 text-center">.....................</span>
+            </div>
+
+            <!-- เรื่อง / เรียน -->
+            <div class="flex items-baseline mb-[1px] text-[16pt]">
+                <span class="font-bold text-[20pt] mr-4">เรื่อง</span>
+                <span id="out_subject" class="flex-1 border-b border-dotted border-gray-500 pl-2">ขออนุมัตินิเทศ... สาขาวิชา ........................</span>
+            </div>
+            <div class="flex items-baseline mb-1 text-[16pt]">
+                <span class="font-bold text-[20pt] mr-4">เรียน</span>
+                <span class="flex-1 pl-2">คณบดีคณะครุศาสตร์</span>
+            </div>
+
+            <!-- เนื้อความ (ปรับขนาด 16pt บีบ Line-height และ Margin ให้สอดคล้องกับขนาด A4 1 หน้าสำหรับออนไซต์) -->
+            <div class="text-[16pt] leading-[1.2] tracking-normal">
+                <div id="out_intro" class="indent-16 mb-1 text-justify">
+                    ด้วยศูนย์ฝึกประสบการณ์วิชาชีพครู คณะครุศาสตร์กำหนดให้มีการนิเทศนักศึกษาฝึกประสบการณ์วิชาชีพครูขั้นปฏิบัติการสอนในสถานศึกษา 1/2569 ...
+                </div>
+
+                <div class="indent-16 mb-1">
+                    ดังนั้นข้าพเจ้า <span class="out_requester border-b border-dotted border-gray-500 px-4">......................................................................</span> และผู้มีนามต่อไปนี้
+                </div>
+
+                <!-- รายชื่อผู้ร่วมเดินทาง (จัดระยะชิดสุดเพื่อเพิ่มพื้นที่ดิ่ง) -->
+                <div class="pl-24 mb-1 space-y-0">
+                    <div class="flex items-baseline"><span class="w-6">1.</span><span id="out_coSup1" class="flex-1 border-b border-dotted border-gray-500">.....................................................................................................</span></div>
+                    <div class="flex items-baseline"><span class="w-6">2.</span><span id="out_coSup2" class="flex-1 border-b border-dotted border-gray-500">.....................................................................................................</span></div>
+                    <div class="flex items-baseline"><span class="w-6">3.</span><span id="out_coSup3" class="flex-1 border-b border-dotted border-gray-500">.....................................................................................................</span></div>
+                    <div class="flex items-baseline" id="out_coSup_4_row"><span class="w-6">4.</span><span id="out_coSup4" class="flex-1 border-b border-dotted border-gray-500">.....................................................................................................</span></div>
+                </div>
+
+                <!-- จัดช่องวันที่ให้ไหลตามข้อความอย่างกระชับ -->
+
+    <div class="indent-16 mb-1">
+    <span id="out_request">จึงขออนุมัตินิเทศ... ในระหว่างวันที่</span>
+    <span id="out_startDate"
+        class="border-b border-dotted border-gray-500 px-1 text-center min-w-[90px]">
+        ..................
+    </span>
+    <span>ถึงวันที่</span>
+    <span id="out_endDate"
+        class="border-b border-dotted border-gray-500 px-1 text-center min-w-[90px]">
+        ..................
+    </span>
+</div>
+
+                <!-- สถานที่ (จัดระยะชิด) -->
+                <div class="mb-1 space-y-0">
+                    <div class="flex items-baseline">
+                        <span class="w-20">ณ โรงเรียน</span><span id="out_school1" class="flex-1 border-b border-dotted border-gray-500">........................</span>
+                        <span class="w-14 text-center">จังหวัด</span><span id="out_province1" class="w-32 border-b border-dotted border-gray-500 text-center">........................</span>
+                    </div>
+                    <div class="flex items-baseline">
+                        <span class="w-20">ณ โรงเรียน</span><span id="out_school2" class="flex-1 border-b border-dotted border-gray-500">........................</span>
+                        <span class="w-14 text-center">จังหวัด</span><span id="out_province2" class="w-32 border-b border-dotted border-gray-500 text-center">........................</span>
+                    </div>
+                    <div class="flex items-baseline">
+                        <span class="w-20">ณ โรงเรียน</span><span id="out_school3" class="flex-1 border-b border-dotted border-gray-500">........................</span>
+                        <span class="w-14 text-center">จังหวัด</span><span id="out_province3" class="w-32 border-b border-dotted border-gray-500 text-center">........................</span>
+                    </div>
+                </div>
+
+                <!-- ข้อมูลรถยนต์ (ออนไซต์) -->
+                <div id="out_vehicle_section" class="indent-16 mb-1 text-justify hidden-element">
+                    ในการเดินทางไปราชการครั้งนี้ เพื่อให้เกิดความคล่องตัว สะดวก รวดเร็ว ทันต่อกำหนดเวลา จึงมีความจำเป็นต้องใช้รถยนต์ส่วนตัว หมายเลขทะเบียน <span id="out_vehicle_text" class="border-b border-dotted border-gray-500 px-4 text-center">......................................</span> เป็นพาหนะในการเดินทาง
+                </div>
+
+                <!-- ย่อหน้าขออนุมัติงบ -->
+                <div id="out_budget" class="indent-16 mb-1 text-justify">
+                    ในการนี้ ขออนุมัติเบิก...
+                </div>
+
+                <!-- ย่อหน้าเรียนพิจารณา -->
+                <div class="mt-1 pt-1 border-gray-150 text-[16pt]">
+                    <div class="indent-16 mb-[2px]">จึงเรียนมาเพื่อโปรดพิจารณา</div>
+                    <div id="out_onsite_consideration" class="pl-16 space-y-0 hidden-element leading-[1.15]">
+                        <div>1. อนุญาตให้เดินทางไปราชการ และอนุญาตให้ใช้รถยนต์ส่วนตัว</div>
+                        <div>2. อนุมัติให้เบิกเงินชดเชยตามอัตราที่กระทรวงการคลังกำหนด/มหาวิทยาลัยกำหนด</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ลายเซ็นผู้ขออนุมัติ -->
+            <div class="flex flex-col items-end  mt-3 pl-6 text-[16pt]">
+                <div class="flex items-baseline mb-[1px]">
+                    <span class="mr-2">ลงชื่อ</span>
+                    <span>..............................................................</span>
+                    <span class="ml-2">ผู้ขออนุมัติ</span>
+                </div>
+                <div class="mr-16">
+                    (<span class="w-52 border-b border-dotted border-gray-500 inline-block text-center out_requester pb-0.5"></span>)
+                </div>
+            </div>
+
+            <!-- ส่วนอนุมัติสำหรับคณบดี (กระชับระยะห่างเพื่อให้อยู่ในหน้าเดียว) -->
+            <div class="mt-1 pt-1 border-gray-150 text-[16pt]">
+            <div class="mt-1 pt-1 border-gray-150 text-[16pt]">
+            <div class="mt-1 pt-1 border-gray-150 text-[16pt]">
+                <!-- อนุมัติ: กรณีไปราชการ (ออนไซต์) -->
+                <div id="out_approval_onsite" class="mb-1 hidden-element">
+                    <div class="flex items-center mb-0.5">
+                        <div class="w-4 h-4 border border-black mr-3 flex-shrink-0"></div>
+                        <span>อนุญาต</span>
+                    </div>
+                    <div class="flex items-center">
+                        <div class="w-4 h-4 border border-black mr-3 flex-shrink-0"></div>
+                        <span>ไม่อนุญาต เนื่องจาก .....................................................................</span>
+                    </div>
+                </div>
+
+                <!-- อนุมัติ: กรณีออนไลน์ -->
+                <div id="out_approval_online" class="mb-1">
+                    <div class="flex items-center mb-0.5">
+                        <div class="w-4 h-4 border border-black mr-3 flex-shrink-0"></div>
+                        <span>อนุญาต</span>
+                    </div>
+                    <div class="flex items-center">
+                        <div class="w-4 h-4 border border-black mr-3 flex-shrink-0"></div>
+                        <span>ไม่อนุญาต เนื่องจาก ........................................................................................................</span>
+                    </div>
+                </div>
+                
+                <!-- ส่วนลงนามของคณบดี -->
+<div class="flex flex-col items-start mt-3 pl-6 text-[16pt]">
+<div class="flex flex-col items-start mt-3 pl-6 text-[16pt]">
+    <div class="text-center inline-block" style="line-height:1.1;">
+        <div>.............................................................................</div>
+        <div>(รองศาสตราจารย์ ดร.วีนัส ภักดิ์นรา)</div>
+        <div>คณบดีคณะครุศาสตร์ ปฏิบัติราชการแทน</div>
+        <div>อธิการบดีมหาวิทยาลัยราชภัฏเลย</div>
+    </div>
+</div>
+            </div>
+            
+        </div>
+    </div>
+
+    <!-- ส่วน JavaScript ควบคุมการทำงาน -->
+    <script>
+        let currentFormType = 'online';
+        let isPreviewMode = false;
+
+        window.onload = function() {
+            lucide.createIcons();
+            setFormType('online'); 
+            syncData(); 
+        };
+
+        function setFormType(type) {
+            currentFormType = type;
+            
+            const btnOnline = document.getElementById('btn-type-online');
+            const circleOnline = document.getElementById('circle-type-online');
+            const btnOnsite = document.getElementById('btn-type-onsite');
+            const circleOnsite = document.getElementById('circle-type-onsite');
+
+            if (type === 'online') {
+                btnOnline.className = 'cursor-pointer px-6 py-3 rounded-full border-2 transition-all flex items-center space-x-2 border-green-500 bg-green-50 text-green-700 font-bold';
+                circleOnline.className = 'w-4 h-4 rounded-full border-2 border-green-500 bg-green-500';
+                btnOnsite.className = 'cursor-pointer px-6 py-3 rounded-full border-2 transition-all flex items-center space-x-2 border-gray-200 hover:bg-gray-50';
+                circleOnsite.className = 'w-4 h-4 rounded-full border-2 border-gray-400';
+
+                document.getElementById('vehicle-input-section').classList.add('hidden-element');
+                document.getElementById('co-sup-4-container').classList.remove('hidden-element');
+            } else {
+                btnOnsite.className = 'cursor-pointer px-6 py-3 rounded-full border-2 transition-all flex items-center space-x-2 border-blue-500 bg-blue-50 text-blue-700 font-bold';
+                circleOnsite.className = 'w-4 h-4 rounded-full border-2 border-blue-500 bg-blue-500';
+                btnOnline.className = 'cursor-pointer px-6 py-3 rounded-full border-2 transition-all flex items-center space-x-2 border-gray-200 hover:bg-gray-50';
+                circleOnline.className = 'w-4 h-4 rounded-full border-2 border-gray-400';
+
+                document.getElementById('vehicle-input-section').classList.remove('hidden-element');
+                document.getElementById('co-sup-4-container').classList.add('hidden-element');
+            }
+            syncData();
+        }
+
+        function formatDateThai(dateString) {
+            if (!dateString) return '';
+            const date = new Date(dateString);
+            if (isNaN(date.getTime())) return '';
+            const months = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
+            return `${date.getDate()} ${months[date.getMonth()]} ${date.getFullYear() + 543}`;
+        }
+
+        function syncData() {
+            const docNo = document.getElementById('in_docNo').value;
+            const docDate = document.getElementById('in_docDate').value;
+            const major = document.getElementById('in_major').value || '';
+            const requester = document.getElementById('in_requester').value || '';
+            const startDate = document.getElementById('in_startDate').value;
+            const endDate = document.getElementById('in_endDate').value;
+            const vehicle = document.getElementById('in_vehicle').value || '';
+
+            document.getElementById('out_docNo').innerText = docNo || '';
+            document.getElementById('out_docDate').innerText = formatDateThai(docDate);
+            document.querySelectorAll('.out_requester').forEach(el => el.innerText = requester);
+            document.getElementById('out_startDate').innerText = formatDateThai(startDate);
+            document.getElementById('out_endDate').innerText = formatDateThai(endDate);
+
+            for (let i = 1; i <= 4; i++) {
+                let val = document.getElementById(`in_coSup${i}`).value;
+                document.getElementById(`out_coSup${i}`).innerText = val || '';
+            }
+            for (let i = 1; i <= 3; i++) {
+                let school = document.getElementById(`in_school${i}`).value;
+                let prov = document.getElementById(`in_province${i}`).value;
+                document.getElementById(`out_school${i}`).innerText = school || '';
+                document.getElementById(`out_province${i}`).innerText = prov || '';
+            }
+
+            if (currentFormType === 'online') {
+                document.getElementById('out_subject').innerText = `ขออนุมัตินิเทศออนไลน์ นิเทศวิชาเอกและวิชาชีพครู สาขาวิชา ${major}`;
+                document.getElementById('out_intro').innerText = `ด้วยศูนย์ฝึกประสบการณ์วิชาชีพครู คณะครุศาสตร์กำหนดให้มีการนิเทศนักศึกษาฝึกประสบการณ์วิชาชีพครูขั้นปฏิบัติการสอนในสถานศึกษา 1/2569 ด้วยระบบออนไลน์`;
+                document.getElementById('out_request').innerText = `จึงขออนุมัตินิเทศออนไลน์ในระหว่างวันที่`;
+                document.getElementById('out_budget').innerText = `ในการนี้ ขออนุมัติเบิกจ่ายค่าตอบแทนนิเทศ จากงบประมาณเหลื่อมปี หมายเลขโครงการ 699012013 และงบประมาณบำรุงการศึกษา หมายเลขโครงการ 690012014 โดยอนุมัติให้เบิกเงินชดเชยตามอัตราที่กระทรวงการคลังกำหนด/มหาวิทยาลัยกำหนด`;
+
+                document.getElementById('out_vehicle_section').classList.add('hidden-element');
+                document.getElementById('out_onsite_consideration').classList.add('hidden-element');
+                document.getElementById('out_approval_online').classList.remove('hidden-element');
+                document.getElementById('out_approval_onsite').classList.add('hidden-element');
+                document.getElementById('out_coSup_4_row').classList.remove('hidden-element');
+            } else {
+                document.getElementById('out_subject').innerText = `ขออนุมัตินิเทศนักศึกษาครุศาสตรบัณฑิต ฝึกประสบการณ์วิชาชีพครู สาขาวิชา ${major}`;
+                document.getElementById('out_intro').innerText = `ด้วยศูนย์ฝึกประสบการณ์วิชาชีพครู คณะครุศาสตร์กำหนดให้มีการนิเทศนักศึกษาฝึกประสบการณ์วิชาชีพครูขั้นปฏิบัติการสอนในสถานศึกษา 1/2569 ณ โรงเรียนเครือข่ายร่วมพัฒนาวิชาชีพครู`;
+                document.getElementById('out_request').innerText = `จึงขออนุญาตเดินทางไปราชการในระหว่างวันที่`;
+                document.getElementById('out_budget').innerText = `ในการนี้ ขออนุมัติเบิกค่าใช้จ่ายในการเดินทางไปราชการ จากงบประมาณเหลื่อมปี หมายเลขโครงการ 699012013 และงบประมาณบำรุงการศึกษา หมายเลขโครงการ 690012014 ทั้งนี้ ถ้าเกิดอุบัติเหตุจากการที่นำรถยนต์ส่วนตัวไปราชการในครั้งนี้ ทางราชการไม่ต้องรับผิดชอบใดๆ ทั้งสิ้น`;
+
+                document.getElementById('out_vehicle_section').classList.remove('hidden-element');
+                document.getElementById('out_onsite_consideration').classList.remove('hidden-element');
+                document.getElementById('out_vehicle_text').innerText = vehicle;
+                document.getElementById('out_approval_online').classList.add('hidden-element');
+                document.getElementById('out_approval_onsite').classList.remove('hidden-element');
+                document.getElementById('out_coSup_4_row').classList.add('hidden-element');
+            }
+        }
+
+        function togglePreview(forcePreview = null) {
+            if (forcePreview !== null) {
+                isPreviewMode = forcePreview;
+            } else {
+                isPreviewMode = !isPreviewMode;
+            }
+
+            const formContainer = document.getElementById('form-container');
+            const previewContainer = document.getElementById('preview-container');
+            const btnTogglePreview = document.getElementById('btn-toggle-preview');
+            const textTogglePreview = document.getElementById('text-toggle-preview');
+            const btnPrint = document.getElementById('btn-print');
+            const btnDownloadPdf = document.getElementById('btn-download-pdf');
+            const btnDownloadDocx = document.getElementById('btn-download-docx');
+            
+            const iconDefault = btnTogglePreview ? btnTogglePreview.querySelector('.icon-default') : null;
+            const iconActive = btnTogglePreview ? btnTogglePreview.querySelector('.icon-active') : null;
+
+            if (isPreviewMode) {
+                if (formContainer) formContainer.classList.add('hidden-element');
+                if (previewContainer) previewContainer.classList.remove('hidden-element');
+                
+                if (textTogglePreview) textTogglePreview.innerText = 'กลับไปแก้ไขฟอร์ม';
+                if (btnTogglePreview) btnTogglePreview.className = 'px-4 py-2 rounded-lg font-medium transition flex items-center space-x-2 bg-white text-green-700 text-base border-2 border-green-600';
+                if (iconDefault) iconDefault.classList.add('hidden-element');
+                if (iconActive) iconActive.classList.remove('hidden-element');
+                
+                if (btnPrint) btnPrint.classList.remove('hidden-element');
+                if (btnDownloadPdf) btnDownloadPdf.classList.remove('hidden-element');
+                if (btnDownloadDocx) btnDownloadDocx.classList.remove('hidden-element');
+            } else {
+                if (formContainer) formContainer.classList.remove('hidden-element');
+                if (previewContainer) previewContainer.classList.add('hidden-element');
+                
+                if (textTogglePreview) textTogglePreview.innerText = 'ดูตัวอย่างเอกสาร';
+                if (btnTogglePreview) btnTogglePreview.className = 'px-4 py-2 rounded-lg font-medium transition flex items-center space-x-2 bg-green-600 hover:bg-green-500 text-white text-base';
+                if (iconDefault) iconDefault.classList.remove('hidden-element');
+                if (iconActive) iconActive.classList.add('hidden-element');
+
+                if (btnPrint) btnPrint.classList.add('hidden-element');
+                if (btnDownloadPdf) btnDownloadPdf.classList.add('hidden-element');
+                if (btnDownloadDocx) btnDownloadDocx.classList.add('hidden-element');
+            }
+        }
+
+        // -----------------------------------------------------------------
+        // ฟังก์ชันดาวน์โหลดเป็น PDF คุณภาพสูง ด้วย html2pdf.js (ขนาด A4 เป๊ะ)
+        // -----------------------------------------------------------------
+        function downloadPDF() {
+            const element = document.getElementById('a4-document-container');
+            const requesterName = document.getElementById('in_requester').value || 'เอกสารขออนุมัตินิเทศ';
+            const filename = `บันทึกข้อความ_${requesterName}.pdf`;
+
+            // กำหนดสัดส่วนและพิกัดการจัดรูปเอกสารให้ล็อกค่าแบบ A4 แน่นอนและไม่เกิน 1 หน้า
+            const opt = {
+                margin:       0,
+                filename:     filename,
+                image:        { type: 'jpeg', quality: 0.98 },
+                html2canvas:  { 
+                    scale: 2.5, // ความละเอียดคมชัดสูงสำหรับการปริ้นท์และเก็บถาวร
+                    useCORS: true, // รองรับตราครุฑและฟอนต์ภายนอก
+                    letterRendering: true,
+                    logging: false
+                },
+                jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
+            };
+
+            // ดำเนินการสร้าง PDF
+            html2pdf().set(opt).from(element).save();
+        }
+
+        // -----------------------------------------------------------------
+        // ฟังก์ชันดาวน์โหลดเป็น Microsoft Word (.doc)
+        // -----------------------------------------------------------------
+        function downloadWord() {
+            const element = document.getElementById('a4-document-container');
+            const requesterName = document.getElementById('in_requester').value || 'เอกสารขออนุมัตินิเทศ';
+            const filename = `บันทึกข้อความ_${requesterName}.doc`;
+
+            const garudaImgSrc = "https://lh3.googleusercontent.com/d/1p8T15vbyZaM8Ra8vriAcoRotn9Ir4OFf";
+            const bodyContent = element.innerHTML;
+
+            const documentTemplate = `
+            <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+            <head>
+                <meta charset="utf-8">
+                <title>บันทึกข้อความ</title>
+                <!--[if gte mso 9]>
+                <xml>
+                    <w:WordDocument>
+                        <w:View>Print</w:View>
+                        <w:Zoom>100</w:Zoom>
+                        <w:DoNotOptimizeForBrowser/>
+                    </w:WordDocument>
+                </xml>
+                <![endif]-->
+                <style>
+                    @page WordSection1 {
+                        size: 21.0cm 29.7cm;
+                        margin: 1.5cm 2.5cm 1.5cm 2.5cm;
+                        mso-header-margin: 35.4pt;
+                        mso-footer-margin: 35.4pt;
+                        mso-paper-source: 0;
+                    }
+                    div.WordSection1 {
+                        page: WordSection1;
+                    }
+                    body {
+                        font-family: 'TH SarabunPSK', 'TH Sarabun New', 'Sarabun', 'Segoe UI', Tahoma, sans-serif;
+                        font-size: 16pt;
+                        line-height: 1.25;
+                        color: #000000;
+                    }
+                    p {
+                        margin: 0in;
+                        margin-bottom: .0001pt;
+                    }
+                    .font-bold {
+                        font-weight: bold;
+                    }
+                    .text-center {
+                        text-align: center;
+                    }
+                    .text-justify {
+                        text-align: justify;
+                    }
+                    .flex {
+                        display: block;
+                    }
+                    .flex-1 {
+                        display: inline;
+                    }
+                    .indent-16 {
+                        text-indent: 1.25cm;
+                    }
+                    .border-b {
+                        border-bottom: 1px dotted #000000;
+                    }
+                    .inline-block {
+                        display: inline-block;
+                    }
+                    .border-b-dotted {
+                        border-bottom: 1px dotted #000;
+                    }
+                </style>
+            </head>
+            <body>
+                <div class="WordSection1">
+                    ${bodyContent}
+                </div>
+            </body>
+            </html>
+            `;
+
+            let finalTemplate = documentTemplate.replace('https://lh3.googleusercontent.com/d/1p8T15vbyZaM8Ra8vriAcoRotn9Ir4OFf', garudaImgSrc);
+
+            const blob = new Blob(['\ufeff' + finalTemplate], {
+                type: 'application/msword;charset=utf-8'
+            });
+
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+    </script>
+          <script language=JavaScript>
+<!--
+var message="Do not click right..!! (อย่าคลิ๊กขวา..!!)";
+///////////////////////////////////
+function clickIE() {if (document.all) {alert(message);return false;}}
+function clickNS(e) {if 
+(document.layers||(document.getElementById&&!document.all)) {
+if (e.which==2||e.which==3) {alert(message);return false;}}}
+if (document.layers) 
+{document.captureEvents(Event.MOUSEDOWN);document.onmousedown=clickNS;}
+else{document.onmouseup=clickNS;document.oncontextmenu=clickIE;}
+document.oncontextmenu=new Function("return false")
+// --> 
+</script>
+</body>
+</html>
